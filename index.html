@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TVC SIM v1 — Thrust Vector Control Simulator</title>
+  <meta name="description" content="Real-time Thrust Vector Control rocket simulator with PID auto-stabilization, physics engine, and hacker terminal UI." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- Boot Overlay                                           -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div id="boot-overlay">
+  <pre id="boot-text"></pre>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- Pre-flight Config Panel                                -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div id="preflight-panel" class="hidden">
+  <div id="preflight-box">
+    <h2>&gt; PRE-FLIGHT_CONFIG</h2>
+
+    <div class="pf-row">
+      <span class="pf-label">ROCKET_MASS (wet)</span>
+      <input type="number" id="pf-mass" value="30" min="5" max="500" step="1" />
+      <span class="pf-unit">kg</span>
+    </div>
+    <div class="pf-row">
+      <span class="pf-label">FUEL_MASS</span>
+      <input type="number" id="pf-fuel" value="15" min="1" max="400" step="1" />
+      <span class="pf-unit">kg</span>
+    </div>
+    <div class="pf-row">
+      <span class="pf-label">MOMENT_ARM (nozzle→CoM)</span>
+      <input type="number" id="pf-arm" value="0.5" min="0.1" max="2" step="0.05" />
+      <span class="pf-unit">m</span>
+    </div>
+    <div class="pf-row">
+      <span class="pf-label">MAX_THRUST</span>
+      <input type="number" id="pf-thrust" value="800" min="50" max="5000" step="50" />
+      <span class="pf-unit">N</span>
+    </div>
+    <div class="pf-row">
+      <span class="pf-label">GIMBAL_LIMIT</span>
+      <input type="number" id="pf-gimbal-lim" value="20" min="5" max="30" step="1" />
+      <span class="pf-unit">°</span>
+    </div>
+    <div class="pf-row">
+      <span class="pf-label">GRAVITY</span>
+      <input type="number" id="pf-gravity" value="9.81" min="0" max="25" step="0.01" />
+      <span class="pf-unit">m/s²</span>
+    </div>
+
+    <div class="btn-row" style="margin-top:14px;">
+      <button class="action-btn" id="btn-pf-launch">APPLY &amp; LAUNCH</button>
+      <button class="action-btn amber" id="btn-pf-cancel">CANCEL</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- Command Reference Overlay                              -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div id="cmd-ref-overlay">
+  <div id="cmd-ref-box">
+    <h2>&gt; COMMAND_REFERENCE</h2>
+    <table>
+      <tbody id="cmd-table-body">
+        <!-- Populated by JS -->
+      </tbody>
+    </table>
+
+    <div style="margin-top:12px; font-size:10px; color:var(--green-dim); line-height:1.8;">
+      <strong style="color:var(--green)">KEYBOARD SHORTCUTS:</strong><br/>
+      SPACE — Pause/Resume &nbsp;|&nbsp; +/- — Zoom &nbsp;|&nbsp; R — Reset<br/>
+      ↑↓ / W·S — Throttle &nbsp;|&nbsp; ←→ / A·D — Gimbal<br/>
+      Mouse Wheel — Zoom &nbsp;|&nbsp; Mouse Drag (paused) — Rotate Rocket
+    </div>
+
+    <div class="btn-row" id="cmd-ref-close">
+      <button class="action-btn" onclick="document.getElementById('cmd-ref-overlay').classList.remove('show')">
+        CLOSE
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- Main App                                               -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div id="app">
+
+  <!-- ── Header ─────────────────────────────────────────── -->
+  <header id="header">
+    <div id="header-title">★ TVC_SIM v1.0</div>
+    <div id="header-status">THRUST VECTOR CONTROL SIMULATOR</div>
+    <div id="header-time" id="header-clock">SYS: NOMINAL</div>
+  </header>
+
+  <!-- ── Simulation Canvas ──────────────────────────────── -->
+  <section id="canvas-panel">
+    <canvas id="sim-canvas"></canvas>
+
+    <!-- HUD Warnings (absolute overlay) -->
+    <div id="hud-warnings">
+      <div class="hud-warn danger" id="warn-attitude">⚠ ATTITUDE WARN</div>
+      <div class="hud-warn warn"   id="warn-fuel">⚠ FUEL LOW</div>
+      <div class="hud-warn warn"   id="warn-overheat">⚠ OVERHEAT</div>
+      <div class="hud-warn good"   id="warn-landed">✓ LANDED</div>
+    </div>
+
+    <div id="pause-hint">■ PAUSED — DRAG TO ROTATE</div>
+  </section>
+
+  <!-- ── Right Panel ────────────────────────────────────── -->
+  <aside id="right-panel">
+
+    <!-- Terminal Log -->
+    <div id="terminal-log" aria-label="Terminal Log" role="log"></div>
+
+    <!-- Mini Graph -->
+    <div id="mini-graph">
+      <div id="graph-label">
+        <span data-graph="pitch"    class="toggle-btn active" style="margin-right:4px">PITCH</span>
+        <span data-graph="speed"    class="toggle-btn" style="margin-right:4px">SPEED</span>
+        <span data-graph="altitude" class="toggle-btn">ALT</span>
+      </div>
+      <canvas id="graph-canvas" style="margin-top:18px"></canvas>
+    </div>
+
+    <!-- Controls -->
+    <div id="controls-panel">
+
+      <!-- Flight Buttons -->
+      <div class="ctrl-section">FLIGHT_CONTROL</div>
+      <div class="btn-row">
+        <button class="action-btn" id="btn-launch"    title="Launch rocket">LAUNCH</button>
+        <button class="action-btn amber" id="btn-pause"  title="Pause/Resume [Space]">PAUSE</button>
+        <button class="action-btn danger" id="btn-reset" title="Reset [R]">RESET</button>
+        <button class="action-btn" id="btn-preflight" title="Pre-flight config">PRE-FLIGHT CONFIG</button>
+      </div>
+
+      <!-- Mode -->
+      <div class="ctrl-section">CONTROL_MODE</div>
+      <div id="mode-selector">
+        <button class="toggle-btn active" id="btn-mode-manual">MANUAL</button>
+        <button class="toggle-btn" id="btn-mode-auto">AUTO-STABLE (PID)</button>
+      </div>
+
+      <!-- Gimbal -->
+      <div class="ctrl-section">GIMBAL_DEFLECT</div>
+      <div class="ctrl-row">
+        <span class="ctrl-label">GIMBAL_X</span>
+        <input type="range" id="sl-gimbal-x" min="-30" max="30" value="0" step="0.1" />
+        <span class="ctrl-value" id="sl-gimbal-x-val">0.0°</span>
+      </div>
+
+      <!-- Throttle -->
+      <div class="ctrl-section">THROTTLE</div>
+      <div class="ctrl-row">
+        <span class="ctrl-label">THROTTLE_%</span>
+        <input type="range" id="sl-throttle" min="0" max="100" value="0" step="1" />
+        <span class="ctrl-value" id="sl-throttle-val">0%</span>
+      </div>
+
+      <!-- PID -->
+      <div class="ctrl-section">PID_GAINS</div>
+      <div class="ctrl-row">
+        <span class="ctrl-label tooltip" data-tip="Proportional — response speed">KP (response)</span>
+        <input type="range" id="sl-kp" min="0" max="10" value="2.0" step="0.05" />
+        <span class="ctrl-value" id="sl-kp-val">2.00</span>
+      </div>
+      <div class="ctrl-row">
+        <span class="ctrl-label tooltip" data-tip="Integral — steady-state error">KI (steady-state)</span>
+        <input type="range" id="sl-ki" min="0" max="1" value="0.05" step="0.005" />
+        <span class="ctrl-value" id="sl-ki-val">0.050</span>
+      </div>
+      <div class="ctrl-row">
+        <span class="ctrl-label tooltip" data-tip="Derivative — damping">KD (damping)</span>
+        <input type="range" id="sl-kd" min="0" max="5" value="0.8" step="0.05" />
+        <span class="ctrl-value" id="sl-kd-val">0.80</span>
+      </div>
+      <div class="ctrl-row">
+        <span class="ctrl-label tooltip" data-tip="Target angle for PID in AUTO mode">TARGET_ANGLE</span>
+        <input type="range" id="sl-target" min="-30" max="30" value="0" step="0.5" />
+        <span class="ctrl-value" id="sl-target-val">0.0°</span>
+      </div>
+
+      <!-- Camera & Speed -->
+      <div class="ctrl-section">CAMERA_&amp;_SPEED</div>
+      <div class="ctrl-row">
+        <span class="ctrl-label">ZOOM_LEVEL</span>
+        <input type="range" id="sl-zoom" min="0.05" max="8" value="0.8" step="0.05" />
+        <span class="ctrl-value" id="sl-zoom-val">0.80</span>
+      </div>
+      <div class="ctrl-row">
+        <span class="ctrl-label">SIM_SPEED</span>
+        <input type="range" id="sl-speed" min="0.1" max="10" value="1" step="0.1" />
+        <span class="ctrl-value" id="sl-speed-val">×1.0</span>
+      </div>
+
+      <!-- Environment -->
+      <div class="ctrl-section">ENVIRONMENT</div>
+      <div class="btn-row">
+        <button class="toggle-btn" id="btn-wind">WIND: OFF</button>
+      </div>
+      <div class="ctrl-row">
+        <span class="ctrl-label">WIND_STRENGTH</span>
+        <input type="range" id="sl-wind-str" min="0" max="20" value="3" step="0.5" />
+        <span class="ctrl-value" id="sl-wind-str-val">3.0m/s</span>
+      </div>
+
+    </div>
+    <!-- /controls-panel -->
+
+  </aside>
+
+  <!-- ── Command Bar ────────────────────────────────────── -->
+  <footer id="cmd-bar">
+    <span id="cmd-prompt">TVC_SIM&gt;</span>
+    <input type="text" id="cmd-input"
+      placeholder="LAUNCH | GIMBAL_X=5 | THROTTLE=80 | MODE=AUTO | ZOOM=2 | HELP ..."
+      autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"
+      aria-label="Command input" />
+    <span id="cmd-help-btn" role="button" aria-label="Show command reference">[HELP]</span>
+  </footer>
+
+</div>
+<!-- /app -->
+
+<!-- Scripts — order matters: physics → renderer → controls → main -->
+<script src="physics.js"></script>
+<script src="renderer.js"></script>
+<script src="controls.js"></script>
+<script src="main.js"></script>
+
+</body>
+</html>
